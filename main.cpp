@@ -2,13 +2,14 @@
 #include <semaphore.h>
 #include <queue>
 #include <mutex>
-#include <sys/stat.h>
 #include <thread>
 #include <vector>
 #include <sstream>
 #include <fstream>
 #include <deque>
 #include <chrono>
+#include <algorithm>
+
 
 using namespace std;
 
@@ -208,7 +209,7 @@ void dispatcher(int producersN) {
                 weatherQ->insert(s);
                 break;
             case DONE:
-                bqVector.erase(std::find(bqVector.begin(), bqVector.end(),bq)); // find the producer that finished and remove him
+                bqVector.erase(find(bqVector.begin(), bqVector.end(),bq)); // find the producer that finished and remove him
                 counter++;
                 break;
         }
@@ -218,7 +219,7 @@ void dispatcher(int producersN) {
     while (true) {
         if(counter == producersN) break;
         // iterate over the dispatcher queues in the vector
-        for_each(bqVector.begin(), bqVector.end(), dispatch);
+        for(BoundedQueue* bq : bqVector){ dispatch(bq);}
         //dispatch(bqVector[i % producersN]);
         //i++;
     }
