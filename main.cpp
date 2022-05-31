@@ -8,11 +8,10 @@
 #include <fstream>
 #include <deque>
 #include <chrono>
-#include <algorithm>
+#include <algorithm> // not needed in clion, but required when compiling with g++
 
 
 using namespace std;
-
 /* ################ Classes ####################### */
 enum types {
     DONE = -3, SPORTS=0, NEWS=1, WEATHER=2
@@ -66,6 +65,9 @@ public:
 
 };
 
+/**
+ * An unbounded queue, uses semaphores to signal the consumers that a producer made a new string
+ */
 class UnBoundedQueue {
 public:
     queue<string> RegularQueue;
@@ -74,11 +76,11 @@ public:
 
 
     UnBoundedQueue() {
-        // initialize the empty for full to be the passed size
+        // initialize the semaphore to 0
         sem_init(&full, 0, 0);
     }
 
-    // emplace a new string in the queue
+    // push a new string into the queue
     void insert(const string &s) {
         // try to get mutex lock on the queue
         m.lock();
@@ -120,6 +122,11 @@ BoundedQueue *smq = nullptr; // screen manager queue
 
 /* ################ Functions ####################### */
 
+/**
+ * Check the category of the passed string by trying to find keywords in the string
+ * @param s the string to check
+ * @return the type of string (enum)
+ */
 int checkCategory(string &s) {
     std::size_t found = s.find("SPORTS");
     // if sports not found continue search
@@ -157,16 +164,21 @@ int checkCategory(string &s) {
     }
 }
 
-// products is the number of products of the producer
+/**
+ * Generate a number of string and puts them into a bounded queue for the @dispatcher to use.
+ * Randomly choose a string category to create.
+ * @param products number of string this producer will generate
+ * @param id the id of this producer
+ * @param size the size of the bouded queue for this instance of a producer
+ */
 void producer(int products, int id, int size) {
-    //auto position = bqVector.begin() + (id - 1);
     int news = 0, sports = 0, weather = 0;
-    auto *bq = new BoundedQueue(size);
-    //bqVector.insert(position,bq);
-    bqVector[id-1] = bq;
+    auto *bq = new BoundedQueue(size); // create a bounded queue for the producer to put string into
+    bqVector[id-1] = bq; // save the bounded queue of this producer in the global vector of queues
     stringstream s;
     // produce strings here
     for (int j = 0; j < products; ++j) {
+        // choose a random string category
         int k = rand() % 3;
         switch (k) {
             case NEWS:
@@ -183,17 +195,21 @@ void producer(int products, int id, int size) {
                 break;
         }
         bq->insert(s.str());
-        //bqVector.push_back(bq);
         s.str("");
     }
     s << "DONE";
     bq->insert(s.str());
 }
 
-// only one exists! works in round-robin
+/**
+ * Iterated over the queues of the producers in a round-robin fashion, each time removing a string from the queue.
+ * the string is sorted into a queue depending on its type and then passed to the editors.
+ * @param producersN the number of producers in the program
+ */
 void dispatcher(int producersN) {
     int counter = 0;
-    // get a queue for a producer, and take out a story
+
+    // get a queue for a producer, and take out a string
     auto dispatch = [&counter](BoundedQueue *bq) {
         string s;
         // get a string
@@ -210,7 +226,9 @@ void dispatcher(int producersN) {
                 weatherQ->insert(s);
                 break;
             case DONE:
-                bqVector.erase(find(bqVector.begin(), bqVector.end(),bq)); // find the producer that finished and remove him
+                auto erasePos = find(bqVector.begin(), bqVector.end(),bq);
+                delete bq;
+                bqVector.erase(erasePos); // find the producer that finished and remove him
                 counter++;
                 break;
         }
@@ -224,14 +242,16 @@ void dispatcher(int producersN) {
         for(BoundedQueue* bq : bqVector){ dispatch(bq);}
     }
 
-    // insert a DONE string to each of the editor queues
+    // insert a DONE string to each of the editor queues to indicate finish of each queue.
     newsQ->insert("DONE");
     sportsQ->insert("DONE");
     weatherQ->insert("DONE");
-
 }
 
-
+/**
+ * Until receiving a "DONE" string from it's queue removes string from it's queue and "edits" them (simulated by sleep)
+ * @param type the type of string the editor operates on
+ */
 void editor(int type) {
     UnBoundedQueue* uq = nullptr;
     switch (type) {
@@ -247,7 +267,7 @@ void editor(int type) {
     }
     while (true) {
         string s = uq->remove();
-        this_thread::sleep_for(chrono::milliseconds(100));
+        this_thread::sleep_for(chrono::milliseconds(100)); // simulate an edit job
         smq->insert(s);
         if (s == "DONE") {
             return;
@@ -255,14 +275,16 @@ void editor(int type) {
     }
 }
 
-// Manages the string queue, printing contents to stdout, until reading DONE from each queue
+/**
+ * Manages the string queue, printing contents to stdout, until reading DONE from each queue
+ */
 void screenManager() {
     int counter = 0;
     while (true) {
         // if all the queues sent a DONE string, we end
         if (counter == 3) {
             std::cout << "DONE" << std::endl;
-            exit(0);
+            return;
         }
         string s = smq->remove();
         if (s == "DONE") {
@@ -273,7 +295,12 @@ void screenManager() {
     }
 }
 
-
+/**
+ *
+ * @param argc needs to be 2
+ * @param argv should contain the path to the config file.
+ * @return
+ */
 int main(int argc, const char *argv[]) {
     std::vector<std::thread> tVector;
     sportsQ = new UnBoundedQueue,
@@ -329,6 +356,13 @@ int main(int argc, const char *argv[]) {
     // start the threads of the dispatcher and screen manager
     thread t5(dispatcher,N);
     thread t6(screenManager);
+    t2.join();
+    t3.join();
+    t4.join();
+    for (thread &t:tVector) {
+        t.join();
+    }
+    t5.join();
     t6.join();
     return 0;
 }
