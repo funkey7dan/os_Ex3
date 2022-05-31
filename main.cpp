@@ -24,6 +24,7 @@ public:
     mutex m;
     sem_t full;
     sem_t empty;
+
     explicit BoundedQueue(int size) {
         // initialize the semaphore for full to be the passed size
         sem_init(&empty, 0, size);
@@ -156,8 +157,8 @@ int checkCategory(string &s) {
     }
 }
 
-// i is the number of products of the producer
-void producer(int i, int id, int size) {
+// products is the number of products of the producer
+void producer(int products, int id, int size) {
     //auto position = bqVector.begin() + (id - 1);
     int news = 0, sports = 0, weather = 0;
     auto *bq = new BoundedQueue(size);
@@ -165,7 +166,7 @@ void producer(int i, int id, int size) {
     bqVector[id-1] = bq;
     stringstream s;
     // produce strings here
-    for (int j = 0; j < i; ++j) {
+    for (int j = 0; j < products; ++j) {
         int k = rand() % 3;
         switch (k) {
             case NEWS:
@@ -189,9 +190,9 @@ void producer(int i, int id, int size) {
     bq->insert(s.str());
 }
 
-// only one exists! works in round robin
+// only one exists! works in round-robin
 void dispatcher(int producersN) {
-    int counter = 0, i = 0;
+    int counter = 0;
     // get a queue for a producer, and take out a story
     auto dispatch = [&counter](BoundedQueue *bq) {
         string s;
@@ -215,14 +216,15 @@ void dispatcher(int producersN) {
         }
     };
 
-    // dispatch while we didn't receive done from each of the producers
+    // dispatch until we receive "DONE" string from each of the producers
     while (true) {
         if(counter == producersN) break;
+
         // iterate over the dispatcher queues in the vector
         for(BoundedQueue* bq : bqVector){ dispatch(bq);}
-        //dispatch(bqVector[i % producersN]);
-        //i++;
     }
+
+    // insert a DONE string to each of the editor queues
     newsQ->insert("DONE");
     sportsQ->insert("DONE");
     weatherQ->insert("DONE");
@@ -253,11 +255,12 @@ void editor(int type) {
     }
 }
 
-
-void screenManager(int producersN) {
+// Manages the string queue, printing contents to stdout, until reading DONE from each queue
+void screenManager() {
     int counter = 0;
     while (true) {
-        if (counter == producersN) {
+        // if all the queues sent a DONE string, we end
+        if (counter == 3) {
             std::cout << "DONE" << std::endl;
             exit(0);
         }
@@ -281,35 +284,38 @@ int main(int argc, const char *argv[]) {
         exit(-1);
     }
 
+    // open the config file from the arguments
     ifstream config(argv[1]);
-//    if (!config.is_open()) {
-//        std::cout << "Error reading the config file!" << std::endl;
-//        exit(-1);
-//    }
 
-    // option 2
+    // using config option 2
     // put all the values into a vector
     deque<string> configVec;
     std::string line;
+    // read the file line by line ignoring whitespace characters
     while (getline(config, line)) {
-        if (line == "\r" || line == "\n" || line == "") {
+        if (line == "\r" || line == "\n" || line.empty()) {
             continue;
         }
         configVec.emplace_back(line);
     }
     config.close();
 
-    // get the size of the screen manager queue
+    // get the size of the screen manager queue which is the last value
     int smSize = stoi(configVec.back());
     configVec.pop_back();
     smq = new BoundedQueue(smSize);
 
+    // start the editor threads
     thread t2(editor, NEWS);
     thread t3(editor, WEATHER);
     thread t4(editor, SPORTS);
-    int N = (configVec.size() / 3); // producers number, each producer has 3 lines in the config
+
+    int N = ((int)configVec.size() / 3); // producers number, each producer has 3 lines in the config
+
+    // set the vector to the amount of producers.
     bqVector.resize(N);
-    // vector of producers queues
+
+    // iterate through the configuration files and start a thread for the producer
     for (int i = 0; i < N; ++i) {
         int id = stoi(configVec.front());
         configVec.pop_front();
@@ -320,9 +326,9 @@ int main(int argc, const char *argv[]) {
         thread t1(&producer, prod_size, id, queue_size);
         tVector.push_back(std::move(t1));
     }
+    // start the threads of the dispatcher and screen manager
     thread t5(dispatcher,N);
-    thread t6(screenManager,N);
-
+    thread t6(screenManager);
     t6.join();
     return 0;
 }
